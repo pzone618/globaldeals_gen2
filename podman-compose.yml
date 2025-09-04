@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  # PostgreSQL 15 Database (Red Hat)
+  postgres:
+    image: registry.redhat.io/rhel9/postgresql-15
+    container_name: globaldeals-postgres
+    environment:
+      POSTGRESQL_DATABASE: globaldeals
+      POSTGRESQL_USER: globaldeals_user
+      POSTGRESQL_PASSWORD: globaldeals_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/opt/app-root/src/postgresql-start/init.sql
+    networks:
+      - globaldeals-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U globaldeals_user -d globaldeals"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: globaldeals-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - globaldeals-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Backend Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: globaldeals-backend
+    environment:
+      - DB_USERNAME=globaldeals_user
+      - DB_PASSWORD=globaldeals_password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=mySecretKey123456789012345678901234567890123456789012345678901234567890
+      - JWT_EXPIRATION=86400000
+      - JWT_REFRESH_EXPIRATION=604800000
+      - LOG_LEVEL=INFO
+      - CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:80
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - globaldeals-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+  # Frontend Service
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: globaldeals-frontend
+    environment:
+      - REACT_APP_API_URL=http://localhost:8080/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - globaldeals-network
+
+  # Nginx Reverse Proxy
+  nginx:
+    image: nginx:alpine
+    container_name: globaldeals-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./infra/nginx/conf.d:/etc/nginx/conf.d
+      - ./infra/nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+      - frontend
+    networks:
+      - globaldeals-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  globaldeals-network:
+    driver: bridge

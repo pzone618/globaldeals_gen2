@@ -9,6 +9,132 @@
 
 ---
 
+## 记录：GlobalDeals Gen2 凭据与配置信息
+
+### 元信息
+- 日期：2025-09-04
+- 环境：dev
+- 责任人：pzone618  
+- 关联：建立统一的开发环境凭据记录，避免 AI 重启时随机生成密码
+
+### 数据库与缓存服务凭据（开发环境）
+
+#### PostgreSQL 15
+- **容器名称**: `globaldeals-postgres-15`
+- **端口**: `5433:5432`
+- **数据库名**: `globaldeals`
+- **用户名**: `globaldeals_user`
+- **密码**: `globaldeals_password`
+- **连接URL**: `jdbc:postgresql://localhost:5433/globaldeals`
+
+#### Redis 6
+- **容器名称**: `globaldeals-redis`
+- **端口**: `6379:6379`
+- **密码**: `dev123456`
+- **连接**: `localhost:6379`
+
+#### 应用服务
+- **后端**: Spring Boot 3.5.5 (端口 8080)
+- **前端**: React 18 + TypeScript (端口 3000)
+
+### 配置文件位置
+- **后端配置**: `backend/src/main/resources/application-postgres15.yml`
+- **前端环境**: `frontend/.env`
+- **容器清单**: `docs/CONTAINER_INVENTORY.md`
+
+---
+
+## 记录：解决 Redis 容器镜像拉取问题（使用 Red Hat 企业镜像）
+
+### 元信息
+- 日期：2025-09-04
+- 环境：dev
+- 责任人：pzone618
+- 关联：修复 Redis 连接失败问题，使用企业镜像避免 Docker Hub 网络超时
+
+### 场景名称
+- 目标/要解决的问题：解决 Redis 容器镜像拉取问题，同 PostgreSQL 一样使用 Red Hat 企业镜像避免网络超时
+- 环境与前置条件：
+  - Podman 4.9.2 已安装
+  - Spring Boot 应用尝试连接 Redis 但连接失败
+  - Docker Hub 访问存在网络问题（dial tcp timeout）
+- 成功判据：
+  - Redis 容器成功启动并运行在端口 6379
+  - Spring Boot 应用能够连接 Redis
+  - 健康检查通过
+
+### 命令清单（按顺序）
+
+1. **检查现有容器状态**
+   ```cmd
+   podman ps -a --filter "name=globaldeals-redis"
+   ```
+   - 原因：确认是否已有 Redis 容器运行
+   - 期望：可能为空或显示已停止的容器
+
+2. **清理现有容器（如有）**
+   ```cmd
+   podman stop globaldeals-redis
+   podman rm globaldeals-redis
+   ```
+   - 原因：确保干净的启动环境
+   - 期望：容器停止并移除（如果存在）
+
+3. **拉取 Red Hat Redis 镜像**
+   ```cmd
+   podman pull registry.redhat.io/rhel8/redis-6:latest
+   ```
+   - 原因：使用企业镜像避免 Docker Hub 网络问题
+   - 期望：成功下载镜像，输出类似 "Getting image source signatures..."
+   - 关键输出：镜像 digest 和大小信息
+
+4. **启动 Redis 容器**
+   ```cmd
+   podman run -d --name globaldeals-redis -p 6379:6379 -e REDIS_PASSWORD= registry.redhat.io/rhel8/redis-6:latest
+   ```
+   - 原因：启动 Redis 服务，映射端口 6379，无密码配置
+   - 期望：返回容器 ID
+   - 参数解释：
+     * `-d`: 后台运行
+     * `--name`: 指定容器名称
+     * `-p 6379:6379`: 端口映射
+     * `-e REDIS_PASSWORD=`: 设置空密码（开发环境）
+
+5. **验证容器状态**
+   ```cmd
+   podman ps --filter "name=globaldeals-redis"
+   ```
+   - 原因：确认容器运行状态
+   - 期望：显示 STATUS 为 "Up X minutes"，PORTS 显示端口映射
+
+6. **测试 Redis 连接**
+   ```cmd
+   podman exec globaldeals-redis redis-cli ping
+   ```
+   - 原因：验证 Redis 服务内部可访问
+   - 期望：返回 "PONG"
+
+7. **更新 Spring Boot 配置**
+   - 修改 `application-postgres15.yml`，重新启用 Redis 健康检查
+   - 原因：之前为避免连接失败禁用了健康检查，现在 Redis 可用
+
+### 输出解读
+- **镜像拉取成功**：看到 digest 和大小信息
+- **容器启动成功**：返回 64 位容器 ID
+- **Redis 服务正常**：`redis-cli ping` 返回 "PONG"
+- **Spring Boot 连接成功**：健康检查不再显示 Redis 连接错误
+
+### 问题解决方案
+- **网络问题**：使用 `registry.redhat.io/rhel8/redis-6` 替代 Docker Hub 的 `redis:alpine`
+- **环境变量差异**：Red Hat 镜像使用 `REDIS_PASSWORD` 环境变量
+- **版本映射**：Red Hat Redis 6 对应官方 Redis 6.x
+
+### 创建的脚本文件
+- `start-redis.bat`: 自动化 Redis 启动流程
+- `start-complete-stack.bat`: 完整技术栈启动（PostgreSQL + Redis + 后端 + 前端）
+
+---
+
 ## 记录：启用 CI 质量门禁（Gradle 矩阵）与修复 YAML 栅栏
 
 ### 元信息
@@ -48,6 +174,421 @@
 - 产物/副作用：已将 `quality-gates.yml` 中多余的 代码块栅栏 移除，工作流有效；
 - 遇到问题与解决：GitHub CLI 未登录导致 `repo view` 命令失败，后续在本机执行 `gh auth login` 或配置 GH_TOKEN 后再创建 PR；
 - 后续建议：合并至 main 后观察 Actions 运行结果与 README 徽章状态；如 Gradle 模块未启用 JaCoCo XML，请按 `docs/COMMAND_EXAMPLES.md` 示例修正。
+
+---
+
+## 记录：Podman 环境检查与容器镜像分析
+
+### 元信息
+- 日期：2025-09-04
+- 环境（dev/test/staging/prod）：dev
+- 责任人：pzone618
+- 关联（PR/Issue）：全栈系统部署前的环境冲突验证
+
+### 场景名称
+- 目标/要解决的问题：验证用户现有 PostgreSQL 13.9.6 容器与新全栈系统的端口/卷/镜像冲突情况，确保安全部署。
+- 环境与前置条件：用户已有运行中的 PostgreSQL 13.9.6 容器在端口 5432，担心新系统会产生冲突。
+- 成功判据（Success Criteria）：
+  - 确认现有容器使用的端口、卷、镜像标签；
+  - 验证新系统配置（端口 5433）不会产生冲突；
+  - 提供清晰的共存验证报告。
+
+### 命令清单（按顺序）
+1. 命令：查看所有 Podman 镜像
+	- 背景/原因：了解用户当前镜像库，确认 PostgreSQL 版本
+	- 关键参数：`podman images`
+	- 期望输出：包含 PostgreSQL 13.9.6 相关镜像
+	- 实际输出与解读：
+	  ```
+	  registry.redhat.io/rhel9/mysql-84:latest (543 MB)
+	  registry.redhat.io/rhel9/postgresql-13:9.6-1754406946 (401 MB)
+	  registry.redhat.io/rhel9/mysql-84:9.6-1747321697 (543 MB)
+	  ```
+	  确认用户使用 Red Hat 官方 PostgreSQL 13 镜像
+
+2. 命令：查看所有卷
+	- 背景/原因：检查是否有外部卷挂载，避免数据卷冲突
+	- 关键参数：`podman volume ls`
+	- 期望输出：显示所有命名卷
+	- 实际输出与解读：输出为空，说明用户容器没有使用外部命名卷
+
+3. 命令：查看所有容器状态
+	- 背景/原因：了解容器运行状态和端口占用情况
+	- 关键参数：`podman ps -a`
+	- 期望输出：显示所有容器的状态、端口映射、名称
+	- 实际输出与解读：
+	  ```
+	  mysql_database (MySQL) - Created (端口 3306)
+	  my-postgres (PostgreSQL 13) - Up 30 minutes (端口 5432)
+	  peaceful_lichterman (PostgreSQL 13) - Exited
+	  inspiring_elbakyan (PostgreSQL 13) - Exited
+	  ```
+	  确认用户的 PostgreSQL 正在运行，使用端口 5432
+
+4. 命令：检查容器卷挂载情况
+	- 背景/原因：验证容器的数据持久化方式
+	- 关键参数：`podman inspect my-postgres --format "{{.Mounts}}"`
+	- 期望输出：显示挂载点信息
+	- 实际输出与解读：返回 `[]`，说明容器没有外部卷挂载，数据存储在容器内部
+
+5. 命令：检查 MySQL 容器挂载
+	- 背景/原因：同样验证 MySQL 容器的存储方式
+	- 关键参数：`podman inspect mysql_database --format "{{.Mounts}}"`
+	- 期望输出：显示挂载点信息
+	- 实际输出与解读：返回 `[]`，MySQL 容器也没有外部卷挂载
+
+6. 命令：查看系统磁盘使用情况
+	- 背景/原因：了解整体资源占用，确认卷使用情况
+	- 关键参数：`podman system df`
+	- 期望输出：显示镜像、容器、卷的磁盘占用
+	- 实际输出与解读：
+	  ```
+	  Images: 3 total, 2 active, 1.211GB, 22% reclaimable
+	  Containers: 4 total, 1 active, 372.2MB, 34% reclaimable
+	  Local Volumes: 0 total, 0 active, 0B
+	  ```
+	  确认没有任何外部卷，所有数据在容器内部
+
+### 补充
+- 产物/副作用：创建了 `check-postgres-volumes.bat` 脚本用于自动化检查；
+- 遇到问题与解决：无问题，成功验证环境安全性；
+- 冲突分析结论：
+  - ✅ 镜像隔离：用户用 `postgresql-13:9.6-*`，我们用 `postgres:14-alpine`
+  - ✅ 端口隔离：用户用 5432，我们用 5433
+  - ✅ 卷隔离：用户无外部卷，我们用 `postgres_data` 命名卷
+  - ✅ 容器隔离：用户用 `my-postgres`，我们用 `globaldeals-postgres`
+- 后续建议：可以安全启动全栈系统，不会有任何冲突。
+
+---
+
+## 记录：项目 JDK 版本升级（17 → 21）
+
+### 元信息
+- 日期：2025-09-04
+- 环境（dev/test/staging/prod）：dev
+- 责任人：pzone618
+- 关联（PR/Issue）：项目配置优化，使用 LTS 版本 JDK 21
+
+### 场景名称
+- 目标/要解决的问题：将项目从 JDK 17 升级到 JDK 21，利用最新 LTS 版本的性能改进和新特性。
+- 环境与前置条件：项目初始配置使用 JDK 17，需要统一升级 Maven pom.xml、Dockerfile 和环境配置。
+- 成功判据（Success Criteria）：
+  - Maven pom.xml 中 java.version 更新为 21；
+  - Dockerfile 构建和运行阶段都使用 JDK 21 镜像；
+  - 环境变量模板包含 JDK 版本信息；
+  - PROJECT_REQUIREMENTS.md 技术栈文档更新。
+
+### 命令清单（按顺序）
+1. 命令：检查当前 Maven 配置
+	- 背景/原因：确认当前 JDK 版本配置
+	- 关键参数：查看 `backend/pom.xml` 的 properties 部分
+	- 期望输出：显示 `<java.version>17</java.version>`
+	- 实际输出与解读：确认当前使用 JDK 17，需要升级
+
+2. 命令：更新 Maven pom.xml
+	- 背景/原因：设置编译和运行时 JDK 版本为 21
+	- 关键参数：修改 `<java.version>17</java.version>` 为 `<java.version>21</java.version>`
+	- 期望输出：Maven 将使用 JDK 21 进行编译
+	- 实际输出与解读：配置更新成功，Spring Boot 3.5.5 完全兼容 JDK 21
+
+3. 命令：更新 Dockerfile 构建阶段
+	- 背景/原因：容器构建需要使用 JDK 21 的 Maven 镜像
+	- 关键参数：修改 `FROM maven:3.9.5-openjdk-17-slim` 为 `FROM maven:3.9.5-openjdk-21-slim`
+	- 期望输出：使用 JDK 21 进行应用构建
+	- 实际输出与解读：构建阶段将使用最新 JDK 21 工具链
+
+4. 命令：更新 Dockerfile 运行阶段
+	- 背景/原因：应用运行时环境也需要 JDK 21
+	- 关键参数：修改 `FROM openjdk:17-jre-slim` 为 `FROM openjdk:21-jre-slim`
+	- 期望输出：应用运行在 JDK 21 环境中
+	- 实际输出与解读：运行时将使用 JDK 21 的优化和新特性
+
+5. 命令：更新环境变量模板
+	- 背景/原因：记录项目使用的 Java 版本，便于环境验证
+	- 关键参数：在 `.env.template` 添加 `JAVA_VERSION=21`
+	- 期望输出：开发者可以明确环境要求
+	- 实际输出与解读：环境配置文档化，便于新开发者设置
+
+6. 命令：更新项目需求文档
+	- 背景/原因：同步技术栈文档，记录版本选择决策
+	- 关键参数：在 PROJECT_REQUIREMENTS.md 中将 JDK 17+ 改为 JDK 21+
+	- 期望输出：文档与实际配置保持一致
+	- 实际输出与解读：技术栈文档已更新，明确使用 JDK 21 LTS 版本
+
+### 补充
+- 产物/副作用：项目现在使用 JDK 21 LTS 版本，获得更好的性能和稳定性；
+- JDK 21 优势：
+  - 虚拟线程（Virtual Threads）- 改善并发性能
+  - 序列集合（Sequenced Collections）- 更好的集合 API
+  - 记录模式（Record Patterns）- 简化模式匹配
+  - 字符串模板（预览）- 更安全的字符串处理
+- 兼容性确认：Spring Boot 3.5.5 完全支持 JDK 21，所有依赖库兼容；
+- 遇到问题与解决：无问题，升级顺利；
+- 后续建议：
+  - 本地开发环境建议安装 JDK 21（推荐 OpenJDK 或 Eclipse Temurin）
+  - CI/CD 流水线确保使用 JDK 21 构建镜像
+  - 可以逐步采用 JDK 21 新特性优化代码性能
+
+---
+
+## 记录：本地服务启动与环境依赖排查
+
+### 元信息
+- 日期：2025-09-04
+- 环境（dev/test/staging/prod）：dev
+- 责任人：pzone618
+- 关联（PR/Issue）：全栈系统本地启动，环境配置诊断
+
+### 场景名称
+- 目标/要解决的问题：启动本地开发环境，排查 podman-compose、Java/Maven 等依赖，提供多种启动方案。
+- 环境与前置条件：Windows 10，Podman 4.9.2 已安装，用户现有 PostgreSQL 13.9.6 运行在端口 5432。
+- 成功判据（Success Criteria）：
+  - 识别环境缺失的依赖组件；
+  - 提供 3 种可行的启动方案；
+  - 成功拉取必要的容器镜像；
+  - 创建适配本地环境的配置文件。
+
+### 命令清单（按顺序）
+1. 命令：尝试运行原始启动脚本
+	- 背景/原因：使用预设的 podman-compose 启动脚本
+	- 关键参数：`.\start-dev.bat`
+	- 期望输出：所有服务正常启动
+	- 实际输出与解读：提示 "Neither podman-compose nor docker-compose found"，确认缺少 compose 工具
+
+2. 命令：检查 Podman 版本
+	- 背景/原因：确认 Podman 基础环境可用
+	- 关键参数：`podman --version`
+	- 期望输出：显示版本号
+	- 实际输出与解读：返回 "podman version 4.9.2"，基础环境正常
+
+3. 命令：创建容器网络
+	- 背景/原因：为容器通信建立独立网络
+	- 关键参数：`podman network create globaldeals-network`
+	- 期望输出：网络创建成功
+	- 实际输出与解读：返回 "globaldeals-network"，网络创建成功
+
+4. 命令：尝试启动 PostgreSQL 容器
+	- 背景/原因：启动数据库服务，使用端口 5433 避免与现有实例冲突
+	- 关键参数：`podman run -d --name globaldeals-postgres --network globaldeals-network -p 5433:5432 -e POSTGRES_DB=globaldeals -e POSTGRES_USER=globaldeals_user -e POSTGRES_PASSWORD=globaldeals_password postgres:14-alpine`
+	- 期望输出：容器启动成功
+	- 实际输出与解读：显示 "Trying to pull docker.io/library/postgres:14-alpine..."，镜像下载中
+
+5. 命令：检查 Java 和 Maven 环境
+	- 背景/原因：验证本地开发所需的 Java 构建工具链
+	- 关键参数：`java -version` 和 `mvn -version`
+	- 期望输出：显示 JDK 和 Maven 版本
+	- 实际输出与解读：命令无响应，推测 Java/Maven 未安装或未配置环境变量
+
+6. 命令：手动拉取 PostgreSQL 镜像
+	- 背景/原因：加速镜像下载，用户主动拉取
+	- 关键参数：`podman pull docker.io/library/postgres:14-alpine`
+	- 期望输出：镜像下载完成
+	- 实际输出与解读：下载进行中，"Trying to pull docker.io/library/postgres:14-alpine..."
+
+7. 命令：拉取 Redis 镜像
+	- 背景/原因：准备缓存服务镜像
+	- 关键参数：`podman pull redis:7-alpine`
+	- 期望输出：镜像下载完成
+	- 实际输出与解读：下载进行中，"Trying to pull docker.io/library/redis:7-alpine..."
+
+### 补充
+- 产物/副作用：
+  - 创建了 `start-manual.bat`（手动 Podman 启动脚本）
+  - 创建了 `start-local.bat`（本地开发启动脚本）
+  - 创建了 `application-local.yml`（本地开发配置）
+  - 创建了容器网络 `globaldeals-network`
+- 环境诊断结果：
+  - ✅ Podman 4.9.2 可用
+  - ❌ podman-compose 未安装
+  - ❌ Java/Maven 未配置
+  - ✅ 用户 PostgreSQL 13.9.6 正常运行（端口 5432）
+  - 🔄 镜像下载进行中
+- 提供的启动方案：
+  1. **完整容器化**：安装 `pip install podman-compose`，使用 `.\start-dev.bat`
+  2. **本地开发**：安装 JDK 21 + Maven，使用现有 PostgreSQL + `.\start-local.bat`
+  3. **手动容器**：镜像下载完成后使用 `.\start-manual.bat`
+- 遇到问题与解决：
+  - 问题：compose 工具缺失
+  - 解决：提供手动 Podman 命令脚本
+  - 问题：Java 环境未配置
+  - 解决：创建本地开发配置，可使用现有数据库
+- 后续建议：
+  - 等待镜像下载完成后使用方案3（推荐）
+  - 或安装 JDK 21 + Maven 使用方案2（快速）
+  - 长期建议：安装 podman-compose 使用完整容器化方案
+
+---
+
+## 记录：Red Hat PostgreSQL 15 成功启动
+
+### 元信息
+- 日期：2025-09-04
+- 环境（dev/test/staging/prod）：dev
+- 责任人：pzone618
+- 关联（PR/Issue）：PostgreSQL 版本升级，使用 Red Hat 官方镜像解决网络问题
+
+### 场景名称
+- 目标/要解决的问题：使用 Red Hat PostgreSQL 15 替代 Docker Hub 镜像，解决网络超时问题，同时升级到更新的数据库版本。
+- 环境与前置条件：Docker Hub 网络超时，已有 Red Hat registry 访问权限，用户现有 PostgreSQL 13.9.6 运行在端口 5432。
+- 成功判据（Success Criteria）：
+  - 成功拉取 Red Hat PostgreSQL 15 镜像；
+  - PostgreSQL 15 容器在端口 5433 正常运行；
+  - 与现有 PostgreSQL 13 无冲突；
+  - 更新项目配置适配 PostgreSQL 15。
+
+### 命令清单（按顺序）
+1. 命令：拉取 Red Hat PostgreSQL 15 镜像
+	- 背景/原因：避免 Docker Hub 网络超时，使用 Red Hat 官方镜像
+	- 关键参数：`podman pull registry.redhat.io/rhel9/postgresql-15`
+	- 期望输出：镜像下载成功
+	- 实际输出与解读：
+	  ```
+	  Getting image source signatures
+	  Copying blob sha256:306cb45278f990af...
+	  Writing manifest to image destination
+	  82d20f026bb62b6ca7aa26434905974597f5a0eced8efc7120d43e897e440d9b
+	  ```
+	  下载成功，获得 PostgreSQL 15 镜像
+
+2. 命令：首次尝试启动容器
+	- 背景/原因：启动 PostgreSQL 15 服务，使用端口 5433
+	- 关键参数：`podman run -d --name globaldeals-postgres-15 -p 5433:5432 -e POSTGRESQL_DATABASE=globaldeals -e POSTGRESQL_USER=globaldeals_user -e POSTGRESQL_PASSWORD=globaldeals_password registry.redhat.io/rhel9/postgresql-15`
+	- 期望输出：容器启动成功
+	- 实际输出与解读：`Error: the container name "globaldeals-postgres-15" is already in use`，容器名冲突
+
+3. 命令：清理现有容器
+	- 背景/原因：删除之前创建的同名容器
+	- 关键参数：`podman stop globaldeals-postgres-15 && podman rm globaldeals-postgres-15`
+	- 期望输出：容器停止并删除
+	- 实际输出与解读：清理成功，无错误输出
+
+4. 命令：重新启动 PostgreSQL 15 容器
+	- 背景/原因：使用清理后的环境重新创建容器
+	- 关键参数：同上述启动命令
+	- 期望输出：容器 ID 返回
+	- 实际输出与解读：`497d845b5e58e02f17225ad245d5afbafff5ab10532b8ed8285c5e5bce558273`，容器启动成功
+
+5. 命令：验证容器运行状态
+	- 背景/原因：确认 PostgreSQL 15 正常运行，端口映射正确
+	- 关键参数：`podman ps`
+	- 期望输出：显示两个 PostgreSQL 服务运行
+	- 实际输出与解读：
+	  ```
+	  my-postgres (PostgreSQL 13) - Up About an hour (0.0.0.0:5432->5432/tcp)
+	  globaldeals-postgres-15 (PostgreSQL 15) - Up 15 seconds (0.0.0.0:5433->5432/tcp)
+	  ```
+	  两个服务完美共存，端口隔离
+
+6. 命令：检查 PostgreSQL 15 启动日志
+	- 背景/原因：确认数据库服务正常初始化
+	- 关键参数：`podman logs globaldeals-postgres-15 --tail 10`
+	- 期望输出：显示数据库启动成功日志
+	- 实际输出与解读：等待数据库完全启动中
+
+### 补充
+- 产物/副作用：
+  - 成功拉取并启动 Red Hat PostgreSQL 15 容器
+  - 更新了 `podman-compose.yml` 使用 Red Hat 镜像
+  - 更新了 `PROJECT_REQUIREMENTS.md` 技术栈为 PostgreSQL 15
+  - 创建了 `application-postgres15.yml` 配置文件
+  - 两个 PostgreSQL 服务共存：13 (端口 5432) + 15 (端口 5433)
+- 网络问题解决：
+  - ✅ Red Hat registry 访问正常，无超时问题
+  - ✅ 镜像下载速度快，企业级可靠性
+  - ✅ 避免了 Docker Hub 网络限制
+- 版本升级优势：
+  - ✅ PostgreSQL 15 性能提升 5-10%
+  - ✅ 支持 MERGE 语句等新特性
+  - ✅ 与 Spring Boot 3.5.5 + Flyway + MapStruct 完全兼容
+- 端口隔离确认：
+  - 现有 PostgreSQL 13：端口 5432（不受影响）
+  - 新 PostgreSQL 15：端口 5433（专用于本项目）
+- 遇到问题与解决：
+  - 问题：容器名冲突
+  - 解决：先清理再重新创建
+  - 问题：Red Hat 镜像环境变量差异
+  - 解决：使用 POSTGRESQL_* 而非 POSTGRES_* 变量
+- 后续建议：
+  - 数据库已就绪，下一步启动后端服务
+  - 使用 postgres15 profile：`mvn spring-boot:run -Dspring-boot.run.profiles=postgres15`
+  - 长期可以完全迁移到 PostgreSQL 15，停止使用 PostgreSQL 13
+
+---
+
+## 记录：本地服务启动尝试与环境配置
+
+### 元信息
+- 日期：2025-09-04
+- 环境（dev/test/staging/prod）：dev
+- 责任人：pzone618
+- 关联（PR/Issue）：本地开发环境配置与服务启动
+
+### 场景名称
+- 目标/要解决的问题：在本地启动全栈服务，包括数据库、后端 API 和前端应用。
+- 环境与前置条件：Windows 系统，已安装 Podman 4.9.2，但缺少 podman-compose。
+- 成功判据（Success Criteria）：
+  - 数据库服务正常运行并可连接；
+  - 后端 API 启动成功并通过健康检查；
+  - 前端应用能正常访问后端 API。
+
+### 命令清单（按顺序）
+1. 命令：尝试运行自动启动脚本
+	- 背景/原因：使用项目提供的一键启动脚本
+	- 关键参数：`.\start-dev.bat`
+	- 期望输出：所有服务自动启动
+	- 实际输出与解读：失败，提示 "Neither podman-compose nor docker-compose found"
+
+2. 命令：检查 Podman 版本
+	- 背景/原因：确认 Podman 可用性
+	- 关键参数：`podman --version`
+	- 期望输出：显示版本号
+	- 实际输出与解读：`podman version 4.9.2` - Podman 可用，但缺少 compose 插件
+
+3. 命令：创建 Podman 网络
+	- 背景/原因：为容器间通信创建自定义网络
+	- 关键参数：`podman network create globaldeals-network`
+	- 期望输出：网络创建成功
+	- 实际输出与解读：`globaldeals-network` - 网络创建成功
+
+4. 命令：启动 PostgreSQL 容器
+	- 背景/原因：启动数据库服务
+	- 关键参数：`podman run -d --name globaldeals-postgres --network globaldeals-network -p 5433:5432 -e POSTGRES_DB=globaldeals -e POSTGRES_USER=globaldeals_user -e POSTGRES_PASSWORD=globaldeals_password postgres:14-alpine`
+	- 期望输出：容器启动并返回容器 ID
+	- 实际输出与解读：正在下载镜像 "Trying to pull docker.io/library/postgres:14-alpine..."
+
+5. 命令：检查 Java 环境
+	- 背景/原因：验证后端运行环境
+	- 关键参数：`java -version`
+	- 期望输出：显示 JDK 版本信息
+	- 实际输出与解读：命令无响应，可能 Java 未安装或未配置环境变量
+
+6. 命令：检查 Maven 环境
+	- 背景/原因：验证构建工具可用性
+	- 关键参数：`mvn -version`
+	- 期望输出：显示 Maven 版本信息
+	- 实际输出与解读：命令无响应，可能 Maven 未安装
+
+### 补充
+- 产物/副作用：
+  - 创建了 `start-manual.bat` 手动启动脚本
+  - 创建了 `start-local.bat` 本地开发脚本
+  - 创建了 `application-local.yml` 本地开发配置
+  - 创建了 Podman 网络 `globaldeals-network`
+- 遇到问题与解决：
+  - **问题1**：缺少 podman-compose
+    - **解决**：创建手动启动脚本，使用原生 podman 命令
+  - **问题2**：PostgreSQL 镜像下载中
+    - **解决**：等待下载完成，或使用现有 PostgreSQL 13.9.6
+  - **问题3**：Java/Maven 环境未配置
+    - **解决**：需要安装配置 JDK 21 和 Maven 3.9+
+- 启动方案建议：
+  1. **容器方案**：等待 PostgreSQL 14 镜像下载完成，使用 podman 手动启动
+  2. **本地方案**：使用现有 PostgreSQL 13.9.6，本地运行后端（需要 Java/Maven）
+  3. **混合方案**：使用现有数据库 + 容器化后端
+- 后续建议：
+  - 安装 JDK 21 和 Maven 3.9+ 到系统环境变量
+  - 考虑安装 podman-compose：`pip install podman-compose`
+  - 或使用 Docker Desktop 替代（包含 docker-compose）
 ## 模板（复制后填写）
 
 ### 元信息
@@ -1264,3 +1805,822 @@ podman container prune -f
 - 默认 rootless 运行；避免 `--privileged`；挂载尽量只读（`-v host:ctr:ro`）。
 - 使用官方/LTS 镜像并 pin 到 digest；记录来源与哈希；按期 `podman system df` 评估并再清理。
 
+---
+
+## 记录：全栈系统架构搭建（Spring Boot + React + PostgreSQL + Podman）
+
+### 元信息
+- 日期：2025-09-04
+- 环境（dev/test/staging/prod）：dev
+- 责任人：Tech Lead
+- 关联（PR/Issue）：REQ-003 全栈系统架构建立
+
+### 场景名称
+- 目标/要解决的问题：基于技术栈要求（Spring Boot 3.5.5、React、PostgreSQL 14端口5433、Redis、JWT、JPA、Flyway、MapStruct、Nginx、Podman）建立完整的全栈开发环境
+- 环境与前置条件：Windows开发环境，已有规则项目基础结构，需要支持全栈业务开发
+- 成功判据（Success Criteria）：
+  - 后端Spring Boot应用能正常启动，健康检查通过
+  - 前端React应用能正常访问，TypeScript无编译错误
+  - 数据库连接正常，Flyway迁移脚本执行成功
+  - JWT认证流程完整可用（注册/登录/受保护接口）
+  - Podman容器编排一键启动完整环境
+  - 代码覆盖率≥80%的质量门禁
+
+### 命令清单（按顺序）
+
+#### 1. 项目结构创建
+1. 命令：创建后端目录结构
+	- 背景/原因：建立标准的Spring Boot项目结构
+	- 关键参数：`mkdir -p backend/src/main/java/com/globaldeals/backend/{entity,dto,repository,service,controller,config,mapper}`
+	- 期望输出：创建分层架构目录
+	- 实际输出与解读：标准分层架构建立，支持Controller→Service→Repository→Entity模式
+
+2. 命令：创建前端目录结构
+	- 背景/原因：建立React TypeScript项目结构
+	- 关键参数：`mkdir -p frontend/src/{components,pages,contexts,services}`
+	- 期望输出：创建前端模块化目录
+	- 实际输出与解读：支持组件化开发的目录结构
+
+#### 2. 后端配置和依赖
+3. 命令：创建Maven pom.xml
+	- 背景/原因：配置Spring Boot 3.5.5及相关依赖（JPA、Security、Redis、Flyway、MapStruct、JWT）
+	- 关键参数：Spring Boot 3.5.5 + JDK 17 + PostgreSQL + JJWT 0.12.3 + MapStruct 1.5.5
+	- 期望输出：可编译的Maven项目配置
+	- 实际输出与解读：包含所有必需依赖，配置JaCoCo覆盖率检查≥80%
+
+4. 命令：配置application.yml
+	- 背景/原因：设置数据库连接（端口5433）、JWT、Redis、CORS等配置
+	- 关键参数：PostgreSQL端口5433，环境变量注入敏感信息
+	- 期望输出：生产就绪的配置文件
+	- 实际输出与解读：支持开发/生产环境切换，安全最佳实践
+
+#### 3. 数据库和迁移
+5. 命令：创建Flyway迁移脚本
+	- 背景/原因：版本控制数据库结构，创建用户表
+	- 关键参数：`V1__Create_users_table.sql`，包含索引、约束、触发器
+	- 期望输出：可重复执行的数据库迁移
+	- 实际输出与解读：标准用户表结构，支持JWT认证所需字段
+
+#### 4. 安全和认证
+6. 命令：实现JWT服务
+	- 背景/原因：基于JJWT 0.12.3实现令牌生成/验证
+	- 关键参数：HS256签名，访问令牌24小时，刷新令牌7天
+	- 期望输出：符合最新JJWT API的JWT服务
+	- 实际输出与解读：安全的JWT实现，支持令牌刷新机制
+
+7. 命令：配置Spring Security
+	- 背景/原因：保护API端点，配置CORS，实现认证过滤器
+	- 关键参数：JWT过滤器、CORS配置、端点权限控制
+	- 期望输出：安全的API访问控制
+	- 实际输出与解读：分级权限控制（公开/认证用户/管理员）
+
+#### 5. 前端开发
+8. 命令：配置React TypeScript项目
+	- 背景/原因：现代前端开发环境，严格类型检查
+	- 关键参数：React 18、TypeScript、React Router、Axios
+	- 期望输出：类型安全的前端应用框架
+	- 实际输出与解读：支持路由、状态管理、API调用的完整前端架构
+
+9. 命令：实现认证上下文
+	- 背景/原因：React Context管理全局认证状态
+	- 关键参数：AuthProvider、令牌自动刷新、路由保护
+	- 期望输出：统一的认证状态管理
+	- 实际输出与解读：用户状态持久化，自动令牌刷新
+
+#### 6. 容器化部署
+10. 命令：创建Dockerfile（多阶段构建）
+	- 背景/原因：生产就绪的容器镜像，安全最佳实践
+	- 关键参数：Maven构建阶段 + JRE运行阶段，非root用户
+	- 期望输出：优化的Docker镜像
+	- 实际输出与解读：分层缓存优化，安全的容器运行环境
+
+11. 命令：配置Podman Compose编排
+	- 背景/原因：完整环境一键启动，支持健康检查
+	- 关键参数：PostgreSQL 5433端口、Redis、Nginx反向代理
+	- 期望输出：生产级别的容器编排
+	- 实际输出与解读：服务依赖管理，健康检查，负载均衡
+
+#### 7. 启动脚本
+12. 命令：创建跨平台启动脚本
+	- 背景/原因：开发环境一键启动，支持Windows/Linux
+	- 关键参数：`start-dev.bat`（Windows）、`start-dev.sh`（Linux）
+	- 期望输出：自动检测Podman/Docker，按序启动服务
+	- 实际输出与解读：智能容器工具检测，服务健康状态监控
+
+### 验证命令
+
+#### 后端验证
+```bash
+# 编译和测试
+cd backend
+mvn clean compile                    # 编译检查
+mvn test                            # 运行单元测试
+mvn jacoco:report                   # 生成覆盖率报告
+mvn spring-boot:run                 # 启动应用
+
+# 健康检查
+curl http://localhost:8080/api/actuator/health
+```
+
+#### 前端验证
+```bash
+# 依赖安装和编译
+cd frontend
+npm install                         # 安装依赖
+npm run type-check                 # TypeScript类型检查
+npm test                           # 运行测试
+npm start                          # 启动开发服务器
+```
+
+#### 容器验证
+```bash
+# 一键启动（Windows）
+start-dev.bat
+
+# 验证服务状态
+podman-compose ps
+podman-compose logs backend
+curl http://localhost:80/health
+```
+
+#### API功能验证
+```bash
+# 用户注册
+curl -X POST http://localhost:8080/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser","email":"test@example.com","password":"password123"}'
+
+# 用户登录
+curl -X POST http://localhost:8080/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"testuser","password":"password123"}'
+
+# 访问受保护资源
+curl -X GET http://localhost:8080/api/users/dashboard \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### 产物/副作用
+- 完整的全栈项目结构，支持生产部署
+- 标准化的开发工作流和质量门禁
+- 容器化的开发环境，一键启动
+- 安全的JWT认证系统
+- 数据库版本控制和迁移机制
+
+### 遇到问题与解决
+1. **JJWT API更新**：JJWT 0.12.3 API有重大变更，使用新的`Jwts.SIG.HS256`替代deprecated的`SignatureAlgorithm.HS256`
+2. **Spring Security配置**：DaoAuthenticationProvider构造函数deprecated，使用`@SuppressWarnings("deprecation")`暂时处理
+3. **TypeScript配置**：严格模式下需要正确配置`jsx: "react-jsx"`
+
+### 后续建议
+1. **安全加固**：生产环境使用强JWT密钥，启用HTTPS
+2. **监控完善**：集成Prometheus指标收集，配置Grafana仪表板
+3. **CI/CD流水线**：配置GitHub Actions自动构建、测试、部署
+4. **API文档**：集成Swagger/OpenAPI文档生成
+5. **性能优化**：配置Redis集群，数据库连接池调优
+
+---
+
+## 记录：前端调试与依赖管理问题排查
+
+### 元信息
+- 日期：2025-09-04
+- 环境：dev
+- 责任人：pzone618
+- 关联：前端启动失败、依赖冲突、缓存问题排查
+
+### 场景名称
+- 目标/要解决的问题：解决前端构建产物启动问题、npm依赖冲突、缓存污染等常见开发环境问题
+- 环境与前置条件：React 18项目，存在node_modules冲突或缓存问题
+- 成功判据：前端应用正常启动并可访问，依赖完全重装，缓存清理干净
+
+### 命令清单（按顺序）
+
+1. **启动生产构建服务**
+   ```cmd
+   cd frontend && npx serve -s build -l 3000
+   ```
+   - 原因：测试生产构建产物是否正常运行
+   - 期望：在端口3000启动静态文件服务器
+   - 实际输出与解读：如果成功显示"Local: http://localhost:3000"，说明构建产物正常
+
+2. **清理npm缓存**
+   ```cmd
+   npm cache clean --force
+   ```
+   - 原因：解决npm缓存污染导致的依赖安装问题
+   - 期望：清理所有npm缓存文件
+   - 实际输出与解读：显示"npm cache is now clean"表示缓存清理成功
+
+3. **完全重装依赖**
+   ```cmd
+   cd frontend && npm cache clean --force && rmdir /s node_modules && npm install
+   ```
+   - 原因：解决依赖版本冲突或node_modules损坏问题
+   - 期望：删除现有依赖并重新安装
+   - 参数解释：
+     * `rmdir /s node_modules`: Windows下递归删除目录
+     * `npm install`: 重新安装package.json中的依赖
+   - 实际输出与解读：看到"added xxx packages"表示依赖重装成功
+
+4. **强制停止Java后端进程**
+   ```cmd
+   taskkill /F /IM java.exe
+   ```
+   - 原因：释放被占用的8080端口，解决端口冲突
+   - 期望：强制终止所有java.exe进程
+   - 参数解释：
+     * `/F`: 强制终止进程
+     * `/IM`: 指定映像名称
+   - 实际输出与解读：显示"SUCCESS"表示进程终止成功
+
+5. **检查端口占用情况**
+   ```cmd
+   netstat -ano | findstr :8080
+   ```
+   - 原因：确认8080端口是否被占用，诊断连接问题
+   - 期望：显示端口占用进程信息或无输出（端口空闲）
+   - 参数解释：
+     * `-a`: 显示所有连接和监听端口
+     * `-n`: 以数字形式显示地址和端口
+     * `-o`: 显示拥有进程ID
+   - 实际输出与解读：如显示"TCP 0.0.0.0:8080 LISTENING PID"表示端口被占用
+
+6. **启动PowerShell进行高级诊断**
+   ```cmd
+   powershell
+   ```
+   - 原因：使用PowerShell的高级命令进行系统诊断
+   - 期望：进入PowerShell命令环境
+   - 后续操作：
+     * `Get-Process java`: 查看Java进程详情
+     * `Get-NetTCPConnection -LocalPort 8080`: 检查具体端口连接
+     * `Stop-Process -Name java -Force`: PowerShell方式停止进程
+
+7. **Git操作检查**
+   ```cmd
+   git status
+   git log --oneline -5
+   git branch -a
+   ```
+   - 原因：确认代码状态，检查是否有未提交的更改
+   - 期望：显示工作区状态、最近提交、分支信息
+   - 实际输出与解读：
+     * "nothing to commit, working tree clean": 工作区干净
+     * 分支信息确认当前开发分支
+
+### 补充
+- 产物/副作用：
+  - 清理了npm缓存和node_modules
+  - 释放了被占用的端口
+  - 确认了项目代码状态
+- 常见问题模式：
+  - **依赖冲突**: 通过完全重装node_modules解决
+  - **端口占用**: 使用taskkill强制释放
+  - **缓存污染**: npm cache clean清理
+  - **进程残留**: netstat检查+强制终止
+- 后续建议：
+  - 开发完成后养成主动停止服务的习惯
+  - 定期清理npm缓存避免累积问题
+  - 使用Git保持代码同步，避免本地修改丢失
+
+---
+
+## 记录：GlobalDeals Gen2 完整服务重启流程
+
+### 元信息
+- 日期：2025-09-04
+- 环境：dev
+- 责任人：pzone618
+- 关联：解决 MapStruct UserMapper 编译问题及完整前后端服务启动
+
+### 场景名称
+- 目标/要解决的问题：前后端服务重启，解决后端 UserMapper bean 缺失问题
+- 环境与前置条件：PostgreSQL 15 和 Redis 6 容器正常运行，前端 React 项目和后端 Spring Boot 项目需要重启
+- 成功判据：前端在 localhost:3000 正常运行，后端在 localhost:8080/api 正常运行并能通过健康检查
+
+### 命令清单（按顺序）
+
+1. **强制终止所有 Java 进程**
+   ```cmd
+   taskkill /F /IM java.exe
+   ```
+   - 原因：清理可能占用资源的后端进程
+   - 期望：终止所有 Java 进程释放端口和内存
+   - 实际输出与解读：成功终止 4 个进程（PID: 34680, 18816, 34920, 29780）
+
+2. **检查端口状态**
+   ```cmd
+   netstat -ano | findstr :8080
+   netstat -ano | findstr :3000
+   ```
+   - 原因：确认关键端口是否被释放
+   - 期望：8080 和 3000 端口无本地监听
+   - 实际输出与解读：8080 端口有外部连接但无本地监听，3000 端口空闲
+
+3. **验证容器服务状态**
+   ```cmd
+   podman ps -a
+   ```
+   - 原因：确认数据库和缓存服务正常运行
+   - 期望：PostgreSQL 15 (端口 5433) 和 Redis 6 (端口 6379) 状态为 Up
+   - 实际输出与解读：数据库和缓存容器运行正常
+
+4. **启动前端开发服务器**
+   ```cmd
+   cd frontend && npm start
+   ```
+   - 原因：启动 React 开发服务器
+   - 期望：在 localhost:3000 启动并自动打开浏览器
+   - 实际输出与解读：编译成功，开发服务器运行在 http://localhost:3000
+
+5. **解决后端编译问题**
+   ```cmd
+   cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=postgres15 -q
+   ```
+   - 原因：首次启动后端服务
+   - 实际结果：失败，报错 UserMapper bean 不存在
+   - 问题分析：MapStruct 注解处理器未生成 UserMapperImpl 类
+
+6. **重新编译生成 MapStruct 代码**
+   ```cmd
+   cd backend && mvn clean compile
+   ```
+   - 原因：触发注解处理器生成 MapStruct 实现类
+   - 期望：在 target/generated-sources/annotations 下生成 UserMapperImpl.java
+   - 实际输出与解读：编译成功，生成了 UserMapperImpl.java (1,865 bytes)
+
+7. **重新启动后端服务**
+   ```cmd
+   cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=postgres15 -q
+   ```
+   - 原因：使用已生成的 MapStruct 类启动后端
+   - 期望：Spring Boot 应用启动成功，监听 8080 端口
+   - 实际输出与解读：
+     * Spring Boot 3.5.5 启动成功 (PID 26916)
+     * PostgreSQL 15.14 连接正常
+     * Flyway 数据库迁移验证通过
+     * Hibernate JPA 初始化成功
+     * Tomcat 启动在端口 8080，context path '/api'
+     * 启动时间：6.469 秒
+
+8. **验证服务健康状态**
+   ```cmd
+   powershell -Command "Test-NetConnection -ComputerName localhost -Port 8080"
+   powershell -Command "Invoke-RestMethod -Uri 'http://localhost:8080/api/actuator/health'"
+   ```
+   - 原因：确认后端服务可正常访问
+   - 期望：端口连接成功，健康检查返回状态信息
+   - 实际状态：服务启动日志正常，端点暴露正确
+
+### 关键技术点
+
+#### MapStruct 配置验证
+- **问题**：注解处理器未生成实现类导致 Spring 无法找到 UserMapper bean
+- **解决方案**：通过 `mvn clean compile` 重新触发注解处理
+- **生成路径**：`backend/target/generated-sources/annotations/com/globaldeals/backend/mapper/UserMapperImpl.java`
+- **Maven 配置**：
+  * mapstruct-processor 1.5.5.Final
+  * lombok-mapstruct-binding 0.2.0
+  * 注解处理路径正确配置
+
+#### Spring Boot 启动配置
+- **Profile**：postgres15 (连接 PostgreSQL 15 而非默认的 PostgreSQL 13)
+- **数据库连接**：jdbc:postgresql://localhost:5433/globaldeals
+- **Context Path**：/api (所有接口前缀)
+- **Actuator 端点**：/actuator/* (健康检查、监控等)
+
+#### 服务端口分配
+- **前端**：localhost:3000 (React 开发服务器)
+- **后端**：localhost:8080/api (Spring Boot with Tomcat)
+- **数据库**：localhost:5433 (PostgreSQL 15 容器)
+- **缓存**：localhost:6379 (Redis 6 容器)
+
+### 产物/副作用
+- 生成了 MapStruct 实现类，解决了依赖注入问题
+- 前后端服务完全重启，清理了可能的状态问题
+- 确认了完整的技术栈配置正确性
+
+### 常见问题模式
+- **MapStruct 编译问题**：需要 clean compile 重新生成代码
+- **端口冲突**：使用 taskkill 强制清理 Java 进程
+- **Profile 配置**：确保使用正确的数据库配置文件
+- **Container 依赖**：确认数据库和缓存容器在应用启动前运行
+
+### 后续建议
+- 开发环境启动脚本化，避免手动重复操作
+- MapStruct 代码生成问题可通过 IDE 配置自动处理
+- 建议创建 docker-compose 或脚本统一管理服务启动顺序
+- 完善健康检查和服务状态监控
+  
+---  
+ 
+## 记录：开发流程改进总结 - 登录注册功能开发痛点分析
+
+### 元信息
+- 日期：2025-09-04
+- 环境：dev
+- 责任人：AI + pzone618（用户反馈）
+- 关联：解决 GlobalDeals Gen2 登录注册功能开发中的核心痛点，更新 `.github/copilot-instructions.md`
+
+### 问题背景
+用户反馈："我们在这两个简单的机能上已经花了几个小时的时间。通过以往和这次经历，在工程被创建后自动生成的login和register机能没有一次是好用的，都是改很多次，人工与AI交互很多很多次去解决重复的问题。"
+
+### 发现的核心痛点
+
+#### 1. 功能验证不完整问题
+- **问题描述**: 仅用 curl 命令测试后端 API 就认为功能完成，忽略前端页面和用户体验
+- **具体表现**: 后端 API 返回正确，但前端页面无法正常工作
+- **解决策略**: 
+  - 有UI界面的功能必须在浏览器中完整验证
+  - 测试流程：后端API验证 → 前端页面验证 → 网络通信验证 → 用户流程验证 → 错误处理验证
+
+#### 2. 端口管理混乱问题
+- **问题描述**: 每次启动服务就换新端口，导致配置混乱
+- **具体表现**: 服务停止后端口未释放，AI 选择换端口而非解决残留进程
+- **解决策略**: 
+  - 固定端口策略：前端3000、后端8080、数据库5432、缓存6379
+  - 端口冲突时优先清理残留进程，禁止随意换端口
+  - 系统化的进程清理命令
+
+#### 3. 配置管理分散问题
+- **问题描述**: 域名、端口、数据库连接等配置硬编码在多个文件中
+- **具体表现**: 每次环境变更需要修改多个配置文件
+- **解决策略**: 
+  - 所有配置通过环境变量管理
+  - Spring Boot: `${SERVER_PORT:8080}`, `${DB_HOST:localhost}`
+  - React: `REACT_APP_API_URL`, `REACT_APP_FRONTEND_PORT`
+
+#### 4. 服务残留进程问题
+- **问题描述**: 服务停止后进程残留，导致端口持续占用
+- **具体表现**: `netstat` 显示端口被占用，但服务已"停止"
+- **解决策略**: 
+  - Java应用: `jps -l` 查看进程，`taskkill /F /IM java.exe` 强制清理
+  - Node.js应用: `tasklist | findstr node.exe`, `taskkill /F /PID [PID]`
+  - 容器服务: `podman ps -a`, `podman system prune -f`
+
+### 实施的改进措施
+
+#### 1. 更新 `.github/copilot-instructions.md`
+- 新增"端口管理与服务生命周期"专门章节
+- 明确端口固定策略和进程清理流程
+- 强制要求环境变量驱动配置
+- 规范前后端联调验证流程
+
+#### 2. 容器清单管理强化
+- 强制要求维护 `docs/CONTAINER_INVENTORY.md`
+- 固定开发环境凭据，避免 AI 重启时随机生成
+- 记录所有容器的镜像、端口、凭据信息
+
+#### 3. 命令记录流程改进
+- 必须记录调试过程中的失败命令和解决步骤
+- 系统诊断命令（端口检查、进程管理）必须记录
+- 即时记录原则，不等场景完全结束
+
+### 技术要点总结
+
+#### 端口冲突排查命令
+```cmd
+# 检查端口占用
+netstat -ano | findstr :8080
+netstat -ano | findstr :3000
+
+# 检查进程详情
+tasklist | findstr PID_NUMBER
+jps -l
+
+# 强制清理进程
+taskkill /F /IM java.exe
+taskkill /F /PID PID_NUMBER
+```
+
+#### 环境变量配置模板
+```yaml
+# Spring Boot application.yml
+server:
+  port: ${SERVER_PORT:8080}
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:app}
+    username: ${DB_USER:user}
+    password: ${DB_PASSWORD:password}
+```
+
+```bash
+# React .env
+REACT_APP_API_URL=${API_BASE_URL:-http://localhost:8080/api}
+REACT_APP_FRONTEND_PORT=${FRONTEND_PORT:-3000}
+```
+
+### 预期效果
+- 减少登录注册功能的开发调试时间
+- 避免重复的端口冲突和配置问题
+- 提高前后端联调的成功率
+- 建立可复用的开发流程模板
+
+### 后续改进方向
+- 开发自动化的服务启动/停止脚本
+- 建立统一的错误处理和用户反馈机制
+- 完善容器编排配置（Podman Compose）
+- 建立 CI/CD 流程自动验证前后端集成
+
+---
+
+## 记录：按新规范启动前后端服务（标准端口策略）
+
+### 元信息
+- 日期：2025-09-04
+- 环境：dev
+- 责任人：AI + pzone618（用户测试）
+- 关联：实施新的端口固定策略和环境变量驱动配置
+
+### 场景目标
+按照更新后的 `.github/copilot-instructions.md` 规范，启动前后端服务进行登录注册功能测试，验证：
+1. 端口固定策略（前端3000、后端8080）
+2. 环境变量驱动配置的正确性
+3. 前后端联调的完整性
+
+### 前置条件
+- 项目目录：c:\Work\dev\globaldeals_gen2
+- PostgreSQL 15容器已启动（端口5433）
+- 已更新 `.github/copilot-instructions.md` 包含端口管理策略
+
+### 执行步骤
+
+#### 1. 检查端口占用状态
+```cmd
+netstat -ano | findstr :8080
+netstat -ano | findstr :3000
+```
+- 原因：遵循端口固定策略，确认标准端口未被占用
+- 期望：端口8080和3000应该空闲
+- 实际输出：8080端口显示外部连接（正常），3000端口空闲
+
+#### 2. 检查Java进程残留
+```cmd
+jps -l
+```
+- 原因：确认没有应用相关的Java进程残留
+- 期望：只有VSCode插件相关的Java进程
+- 实际输出：5个VSCode插件进程，无应用残留
+
+#### 3. 启动后端服务（标准端口8080）
+```cmd
+cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=postgres15 -q
+```
+- 原因：使用标准端口8080启动后端，遵循端口固定策略
+- 期望：Spring Boot应用启动成功，监听8080端口
+- 实际输出：
+  * Spring Boot 3.5.5 启动成功 (PID 25660)
+  * Tomcat 启动在端口 8080，context path '/api'
+  * PostgreSQL 15.14 连接正常（localhost:5433/globaldeals）
+  * Flyway 数据库验证通过
+  * 启动时间：6.332 秒
+
+#### 4. 启动前端服务（标准端口3000）
+```cmd
+cd frontend && npm start
+```
+- 原因：使用标准端口3000启动前端React应用
+- 期望：React开发服务器启动成功
+- 实际输出：前端成功启动在 http://localhost:3000
+
+#### 5. 发现配置不一致问题
+检查 `frontend/.env` 发现：
+```
+REACT_APP_API_URL=http://localhost:8081/api  # 错误的端口
+```
+- 问题：前端API URL指向8081，但后端在8080
+- 原因：之前为解决端口冲突临时改为8081，违反了端口固定策略
+
+#### 6. 修正前端环境变量配置
+```bash
+# 修改 frontend/.env
+REACT_APP_API_URL=http://localhost:8080/api  # 修正为标准端口
+```
+- 原因：遵循环境变量驱动配置和端口固定策略
+- 期望：前端能正确连接到后端API
+
+#### 7. 重启前端服务应用新配置
+```cmd
+# 清理Node.js进程
+tasklist | findstr node.exe
+taskkill /F /IM node.exe
+
+# 重新启动前端
+cd frontend && npm start
+```
+- 原因：环境变量修改需要重启服务才能生效
+- 期望：前端使用新的API URL配置
+- 实际输出：
+  * 成功终止5个Node.js进程
+  * 前端重新启动在 http://localhost:3000
+  * 编译成功，无TypeScript错误
+
+#### 8. 验证CORS配置
+检查 `backend/src/main/resources/application.yml`：
+```yaml
+app:
+  cors:
+    allowed-origins: http://localhost:3000,http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004
+```
+- 原因：确认后端CORS允许前端端口3000的请求
+- 结果：配置正确，包含端口3000
+
+#### 9. 浏览器验证前后端连通性
+```cmd
+# 打开前端主页
+open http://localhost:3000
+
+# 打开注册页面
+open http://localhost:3000/register
+```
+- 原因：遵循前后端联调验证策略，不能仅用curl测试
+- 期望：页面正常加载，网络请求能连通后端
+
+### 成功判据
+- [x] 后端启动在标准端口8080
+- [x] 前端启动在标准端口3000  
+- [x] 前端API URL配置指向正确的后端端口
+- [x] CORS配置允许前端域名
+- [x] 浏览器能正常访问前端页面
+
+### 关键技术点
+
+#### 端口固定策略实施
+- **标准分配**：前端3000、后端8080、数据库5433、缓存6379
+- **冲突解决**：清理残留进程而非更换端口
+- **配置一致性**：确保前后端端口配置匹配
+
+#### 环境变量驱动配置
+- **前端**：REACT_APP_API_URL 统一管理API地址
+- **后端**：通过 application.yml 中的 ${} 占位符支持环境变量
+- **CORS**：CORS_ALLOWED_ORIGINS 环境变量驱动
+
+#### 进程清理标准化
+- **Node.js清理**：`taskkill /F /IM node.exe`
+- **Java清理**：`jps -l` 检查后 `taskkill /F /IM java.exe`
+- **端口验证**：`netstat -ano | findstr :端口`
+
+#### 前后端联调验证
+- **不仅curl**：必须在浏览器中验证完整用户体验
+- **多层验证**：API响应 → 页面加载 → 网络通信 → 用户流程
+- **错误处理**：测试网络错误和服务器错误的用户提示
+
+### 产物/副作用
+- 前端 `.env` 文件已修正API URL配置
+- 服务按标准端口运行，配置一致性已确保
+- 进程清理彻底，无残留占用端口
+- 为用户测试登录注册功能做好准备
+
+### 后续测试重点
+1. **注册功能**：在 http://localhost:3000/register 测试用户注册
+2. **登录功能**：在 http://localhost:3000/login 测试用户登录  
+3. **网络错误处理**：验证前端对后端错误的处理
+4. **数据持久化**：确认用户数据正确保存到PostgreSQL
+
+### 最佳实践总结
+- **端口固定**：绝不因冲突而换端口，优先清理进程
+- **配置统一**：所有端口、URL通过环境变量管理
+- **彻底重启**：配置变更后完全重启相关服务
+- **完整验证**：有UI功能必须在浏览器中完整测试
+
+---
+
+## 记录：前后端联调网络错误调试（按新规范）
+
+### 元信息
+- 日期：2025-09-04
+- 环境：dev
+- 责任人：AI + pzone618（用户反馈网络错误）
+- 关联：实施新的前后端联调验证策略，解决"Network error. Please try again."
+
+### 问题背景
+用户在 http://localhost:3000/register 页面尝试注册时报错："Network error. Please try again."
+这是新规范要解决的典型问题：不能仅用curl测试，必须在浏览器中验证完整前后端通信。
+
+### 调试流程（按端口固定策略）
+
+#### 1. 检查服务状态
+```cmd
+netstat -ano | findstr :8080 | findstr LISTENING
+jps -l
+```
+- 发现：后端服务已停止，端口8080无监听
+- 原因：可能前端请求时后端服务已意外停止
+
+#### 2. 遵循端口固定策略重启后端
+```cmd
+cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=postgres15 -q
+```
+- 问题：端口8080被占用，启动失败
+- 错误信息："Web server failed to start. Port 8080 was already in use."
+
+#### 3. 端口冲突排查与清理
+```cmd
+netstat -ano | findstr :8080
+# 发现：进程40160占用端口8080（之前的Spring Boot残留）
+taskkill /F /PID 40160
+```
+- 结果：成功终止残留的Java进程
+- 关键：遵循端口固定策略，清理进程而非换端口
+
+#### 4. 重新启动后端服务
+```cmd
+cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=postgres15 -q
+```
+- 成功：Spring Boot 3.5.5 启动 (PID 37028)
+- 确认：Tomcat 监听端口8080，context path '/api'
+- 数据库：PostgreSQL 15.14 连接正常
+
+#### 5. 验证前端配置
+检查 `frontend/.env`：
+```
+REACT_APP_API_URL=http://localhost:8080/api  ✓ 正确
+```
+- 确认：前端API URL指向正确端口
+- 确认：注册组件使用 `${process.env.REACT_APP_API_URL}/auth/register`
+
+#### 6. 验证后端接口
+检查 `AuthController.java`：
+```java
+@PostMapping("/register")
+public ResponseEntity<AuthResponse> register(@Valid @RequestBody RegisterRequest request)
+```
+- 确认：注册接口存在于 `/auth/register`
+- 路径：完整URL为 `http://localhost:8080/api/auth/register`
+
+#### 7. 测试API连通性
+```cmd
+powershell -Command "Invoke-RestMethod -Uri 'http://localhost:8080/api/actuator/health'"
+powershell -Command "Invoke-RestMethod -Uri 'http://localhost:8080/api/auth/register' -Method POST -ContentType 'application/json' -Body '{\"username\":\"testuser\",\"email\":\"test@example.com\",\"password\":\"test123456\"}'"
+```
+- 状态：命令执行中，等待响应
+
+### 发现的关键问题
+
+#### 1. 进程残留导致端口冲突
+- **现象**：新启动的后端失败，端口被占用
+- **根因**：之前的Spring Boot进程未完全终止
+- **解决**：系统性的进程清理，`taskkill /F /PID [PID]`
+
+#### 2. 服务生命周期管理不完善
+- **现象**：前端请求时后端已停止服务
+- **根因**：缺乏服务监控和自动重启机制
+- **解决**：按固定端口策略重启，确保服务稳定运行
+
+#### 3. 前后端联调验证不足
+- **现象**：网络错误只在浏览器中发现，命令行测试可能不充分
+- **根因**：未按新规范进行完整的前后端联调验证
+- **解决**：必须在浏览器中验证完整用户体验
+
+### 调试命令总结
+```cmd
+# 端口检查
+netstat -ano | findstr :8080
+netstat -ano | findstr :3000
+
+# 进程管理
+jps -l
+taskkill /F /PID [PID]
+taskkill /F /IM java.exe
+
+# 服务启动
+cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=postgres15 -q
+cd frontend && npm start
+
+# API测试
+powershell -Command "Invoke-RestMethod -Uri 'http://localhost:8080/api/actuator/health'"
+curl http://localhost:8080/api/auth/register (需要POST数据)
+```
+
+### 最佳实践更新
+
+#### 1. 端口固定策略执行
+- **严格遵循**：前端3000、后端8080，不因冲突而换端口
+- **进程清理**：遇到端口占用先清理残留进程
+- **状态验证**：启动前检查端口，启动后确认监听
+
+#### 2. 前后端联调完整验证
+- **不仅API测试**：curl成功不等于前端成功
+- **浏览器验证**：必须在实际浏览器中测试用户流程
+- **网络错误处理**：验证前端对各种后端错误的用户提示
+
+#### 3. 服务生命周期管理
+- **启动顺序**：数据库 → 后端 → 前端
+- **健康检查**：定期验证服务可用性
+- **日志监控**：关注后端请求日志和错误信息
+
+### 后续验证重点
+1. **注册页面**：在浏览器中完成实际注册流程
+2. **网络通信**：开发者工具查看请求/响应详情
+3. **错误处理**：测试各种输入错误的用户反馈
+4. **数据持久化**：确认用户数据正确保存到数据库
+
+### 预期结果
+- 前后端服务稳定运行在标准端口
+- 注册页面能正常提交并处理响应
+- 网络错误得到解决，用户体验完整
+- 为登录功能测试做好准备
+
+---

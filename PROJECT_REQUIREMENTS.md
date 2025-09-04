@@ -2,7 +2,61 @@
 
 本文件定义项目的目标、范围、质量门槛与工作流要求，作为执行与验收的依据。
 
-## 1. 目标与范围
+## 1. 项目基础信息
+- **项目名称**: GlobalDeals Gen2 - 全栈电商系统
+- **技术栈**: Spring Boot 3.5.5 + Java 17 + React 18 + PostgreSQL 15 + Redis 6
+- **容器技术**: Podman（主要）/ Docker（备选），使用 Red Hat 镜像源
+- **命名约定**: 所有容器使用 `globaldeals-*` 前缀
+- **开发环境凭据**（必须固定，避免 AI 随机生成）：
+  - PostgreSQL: `globaldeals_user/globaldeals_password/globaldeals`
+  - Redis: `dev123456`
+
+## 2. 全栈工程架构要求
+### 工程建立优先级
+**后端 → 容器服务 → 前端 → 集成**，确保基础设施稳定后再构建上层应用
+
+### 后端工程规范
+- **生成方式**: 使用 Spring Initializr (https://start.spring.io/) 生成 Spring Boot 3.5.5 + Java 17 项目
+- **必需依赖**: Spring Web, Spring Data JPA, Spring Security, PostgreSQL Driver, Redis, Flyway, Actuator
+- **目录结构**: `backend/src/main/java/com/globaldeals/backend/`
+- **配置文件**: 
+  - `application.yml` (通用配置)
+  - `application-postgres15.yml` (PostgreSQL 15 特定配置)
+
+### 前端工程规范
+- **生成方式**: 使用 React 官方推荐的 `npx create-react-app globaldeals-frontend --template typescript`
+- **必需依赖**: React 18+, TypeScript, React Router, Axios, 测试框架
+- **目录结构**: `frontend/src/` (components, pages, services, contexts, utils)
+- **配置文件**: 
+  - `.env` (REACT_APP_API_URL)
+  - `tsconfig.json` (严格模式)
+  - `package.json` (脚本和依赖)
+- **开发服务器**: 端口 3000，代理 API 请求到后端
+
+### 容器服务规范
+- **PostgreSQL 15**: 
+  - 镜像: `registry.redhat.io/rhel9/postgresql-15:latest`
+  - 容器名: `globaldeals-postgres-15`
+  - 端口: `5433:5432`
+- **Redis 6**: 
+  - 镜像: `registry.redhat.io/rhel8/redis-6:latest`
+  - 容器名: `globaldeals-redis`
+  - 端口: `6379:6379`
+- **凭据记录**: 必须在 `docs/CONTAINER_INVENTORY.md` 中记录所有用户名、密码、环境变量
+
+### 集成配置要求
+- **后端配置**: `application-postgres15.yml` (数据库和 Redis 连接)
+- **前端代理**: 开发环境通过 webpack dev server 代理到后端 API
+- **CORS 配置**: 后端允许前端域名访问
+- **API 基础路径**: `/api` (后端上下文路径)
+
+### 质量门槛
+- **代码覆盖率**: 后端 ≥ 80%，前端 ≥ 80%
+- **类型安全**: TypeScript 严格模式，Java 强类型
+- **测试策略**: 单元测试 + 集成测试，覆盖主流程和边界场景
+- **构建要求**: 无 lint 错误，无 TypeScript 编译错误
+
+## 3. 目标与范围
 - 目标：
 	- 建立统一的工程协作规则（代码生成、流程、测试、安全、提交信息）。
 	- 提供标准化的命令记录方式与高频场景示例，支撑开发/运维复用。
@@ -30,9 +84,15 @@
 - 规则文档：
 	- `COMMAND_REFERENCE.md`（命令记录与高频示例）
 	- `.github/copilot-instructions.md`（Copilot 行为规则）
+	- `docs/AI_COLLABORATION_STRATEGY.md`（AI 状态管理与话题切换策略）
+	- `docs/NEW_TOPIC_STARTER.md`（新话题快速启动模板）
+	- `docs/PROJECT_STATUS_SNAPSHOT.md`（项目状态快照，支持无缝话题切换）
+- 容器清单：
+	- `docs/CONTAINER_INVENTORY.md`（镜像名称、容器名称、端口映射、凭据信息）
+	- 强制包含：项目前缀命名、环境变量、启动/清理命令
 - 测试：`tests/` 下的单元/集成测试，覆盖主流程与边界场景。
 - CI：基础工作流（构建、测试、覆盖率、镜像发布），可最小集成后演进。
-- 运维：Nginx/Cerbot、Docker/Compose、Podman/Compose、蓝绿/金丝雀发布示例。
+- 运维：Nginx/Cerbot、Podman/Compose、蓝绿/金丝雀发布示例（Docker 作为备选方案）。
 
 ## 5. 工作流（6A）
 1) Accept：澄清需求与约束；记录假设。
@@ -72,8 +132,8 @@
 - 小步提交，避免混合无关改动；必要时附带迁移/回滚说明。
 
 ## 10. 环境与工具前置
-- 语言/运行时：Node 18+、Python 3.10+、JDK 17+（视项目而定）。
-- 基础工具：Git、Docker/Compose、Podman/Compose、Make（可选）。
+- 语言/运行时：Node 18+、Python 3.10+、JDK 21+（视项目而定）。
+- 基础工具：Git、Podman/Compose、Make（可选），Docker 作为备选方案。
 - 质量工具：ESLint/Prettier、Black/Ruff/MyPy、Checkstyle/SpotBugs、pytest/JaCoCo。
 
 ## 11. 风险与回滚
@@ -130,7 +190,7 @@
 ### 需求登记：REQ-002 — Monorepo 质量门禁增强（多模块覆盖率与矩阵）
 - 需求 ID（唯一）：REQ-002
 - 标题/名称：Monorepo 质量门禁增强（多模块覆盖率与矩阵）
-- 背景与动机：当前质量门禁对单项目有效；随着仓库演进为多模块/Monorepo，需要按模块检测语言与运行任务，并对每个模块独立计算与阻断覆盖率，避免单模块“吃掉”其他模块的失败。
+- 背景与动机：当前质量门禁对单项目有效；随着仓库演进为多模块/Monorepo，需要按模块检测语言与运行任务，并对每个模块独立计算与阻断覆盖率，避免单模块"吃掉"其他模块的失败。
 - 详细描述（用户故事/场景/约束）：
 	- 在 `.github/workflows/quality-gates.yml` 中增加模块发现逻辑（Python/Node/Java：Maven/Gradle），基于路径策略生成矩阵；每个模块运行对应的 Lint/类型检查与测试，产出覆盖率报告。
 	- 聚合与判定：对每个模块单独判定覆盖率阈值（≥80%）；任何模块低于阈值即失败，并在总结输出中标明模块名称与覆盖率。
@@ -151,11 +211,53 @@
 - 关联（Issue/PR/设计文档/命令记录链接）：Issue-TBD、分支 ci/quality-gates-gradle-matrix（PR 待创建）、docs/COMMAND_EXAMPLES.md#ci-质量门禁
 - 状态（Draft/In progress/Blocked/Done）：In progress
 
+### 需求登记：REQ-003 — 全栈系统架构建立（Spring Boot + React + PostgreSQL + Podman）
+- 需求 ID（唯一）：REQ-003
+- 标题/名称：全栈系统架构建立（Spring Boot + React + PostgreSQL + Podman）
+- 背景与动机：基于现有规则项目，建立一个可生产使用的全栈系统架构，支持业务快速开发和部署
+- 详细描述（用户故事/场景/约束）：
+	- 后端：Spring Boot 3.5.5 + Maven + JDK 21 + JPA + JWT认证 + MapStruct映射 + Flyway数据库迁移 + Redis缓存
+	- 前端：React 18+ 官方脚手架，TypeScript严格模式，与后端API集成
+	- 数据库：PostgreSQL 15 (Red Hat)，端口5433，包含数据库迁移脚本
+	- 容器化：Podman容器编排，多阶段构建优化，开发/生产环境分离
+	- **镜像策略**：优先使用 Red Hat 企业镜像 (registry.redhat.io)，避免 Docker Hub 网络问题
+		- PostgreSQL: registry.redhat.io/rhel9/postgresql-15:latest  
+		- Redis: registry.redhat.io/rhel8/redis-6:latest
+		- 环境变量: Red Hat 镜像使用 POSTGRESQL_*, REDIS_PASSWORD (必须)
+	- **容器命名**：使用项目前缀 `globaldeals-*` 避免与其他项目冲突
+		- PostgreSQL: globaldeals-postgres-15 (端口 5433)
+		- Redis: globaldeals-redis (端口 6379)
+		- 后端: globaldeals-backend (端口 8080)
+		- 前端: globaldeals-frontend (端口 3000)
+	- **凭据管理**：开发环境凭据清晰记录（避免 AI 重启服务时随机生成导致人工介入困难），生产环境使用环境变量注入
+	- 代理：Nginx反向代理，静态资源服务，SSL终端
+	- 安全：JWT令牌管理，输入校验，SQL注入防护，敏感信息加密
+	- 分层架构：Controller → Service → Repository → Entity，依赖单向，便于测试
+- 优先级（MoSCoW 或 P0/1/2）：P0
+- 验收标准（可量化）：
+	- 后端能正常启动并通过健康检查，覆盖率≥80%
+	- 前端能正常构建并展示登录/主页面，TypeScript无错误
+	- 数据库连接正常，Flyway迁移执行成功
+	- **容器清单完整**：`docs/CONTAINER_INVENTORY.md` 包含所有镜像名称、容器名称、端口映射、凭据信息
+	- Podman compose能一键启动完整环境（backend + frontend + db + redis + nginx）
+	- 用户能完成注册/登录/访问受保护资源的端到端流程
+	- 所有密钥通过环境变量注入，日志不包含敏感信息
+- 依赖与外部接口：Spring Initializr、React官方CLI、PostgreSQL、Redis、Podman、Nginx
+- 风险与回滚策略：组件启动失败时有明确错误提示和回滚步骤；保留 Docker Compose 作为备选方案
+- 安全/合规影响（数据、权限、日志）：JWT密钥轮换机制，密码哈希存储，审计日志记录用户操作，CORS配置
+- 非功能性指标（性能/可用性/容量/延迟）：API响应时间<200ms，数据库连接池10-50，Redis键TTL设置，支持500并发用户
+- 变更影响面（代码/配置/数据/部署）：新增backend/、frontend/目录，podman-compose.yml、nginx配置、数据库迁移脚本
+- 责任人/协作人：Tech Lead / Full Stack Developer
+- 计划里程碑/截止时间：2025-09-15
+- 关联（Issue/PR/设计文档/命令记录链接）：本PR、COMMAND_REFERENCE.md#全栈环境搭建、docs/ARCHITECTURE.md
+- 状态（Draft/In progress/Blocked/Done）：In progress
+
 ## 14. 需求清单（样表）
 | 需求ID | 标题 | 优先级 | 负责人 | 状态 | 验收标准（摘要） | 依赖 | 回滚策略 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | REQ-001 | | P0 | | Draft | | | |
 | REQ-002 | Monorepo 质量门禁增强（多模块覆盖率与矩阵） | P1 | Repo Maintainer | In progress | 每模块覆盖率≥80%，矩阵执行与单模块兼容（含 Java Maven/Gradle） | GH Actions 与覆盖率工具 | 一键回退至单任务工作流 |
+| REQ-003 | 全栈系统架构建立（Spring Boot + React + PostgreSQL + Podman） | P0 | Tech Lead | In progress | 端到端用户流程可用，后端/前端覆盖率≥80%，Podman一键部署 | Spring Initializr、React CLI、PostgreSQL、Podman | Docker Compose备选，组件级回滚 |
 
 ## 15. 非功能性需求（NFR）清单
 - 性能：
@@ -176,6 +278,7 @@
 | --- | --- | --- | --- | --- | --- | --- |
 | REQ-001 | | | tests/test_x.py::TestX | 85% | Release-2025-09-10 | 演练通过 |
 | REQ-002 | README.md#质量门禁与Monorepo、docs/COMMAND_EXAMPLES.md#ci-质量门禁 | 分支 ci/quality-gates-gradle-matrix（PR-TBD） | workflow 矩阵干跑与路径匹配验证（act 或分支验证） | 每模块≥80%（阈值判定，含 Gradle） | 启用 quality-gates 工作流 v2（日期TBD） | 已验证单任务回退路径 |
+| REQ-003 | docs/ARCHITECTURE.md、README.md#全栈架构 | 本PR（全栈工程搭建） | backend/src/test/**、frontend/src/**/*.test.ts | 后端≥80%、前端≥80% | Podman compose部署演练（2025-09-15） | Docker Compose备选验证 |
 
 ## 17. 需求变更记录（Changelog）
 | 日期 | 需求ID | 变更内容 | 原因/讨论 | 影响范围 | 审批/PR |

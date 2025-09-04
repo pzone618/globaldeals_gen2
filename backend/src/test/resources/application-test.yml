@@ -1,0 +1,58 @@
+spring:
+  application:
+    name: globaldeals-backend-test
+  
+  # Test Database Configuration
+  datasource:
+    url: jdbc:h2:mem:testdb
+    username: sa
+    password: 
+    driver-class-name: org.h2.Driver
+  
+  # JPA Configuration for tests
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        dialect: org.hibernate.dialect.H2Dialect
+  
+  # Flyway disabled for tests (using ddl-auto instead)
+  flyway:
+    enabled: false
+    
+  # Redis Configuration for tests
+  data:
+    redis:
+      host: localhost
+      port: 6379
+      timeout: 1000ms
+  
+  # Security Configuration for tests
+  security:
+    jwt:
+      secret: testSecretKey123456789012345678901234567890123456789012345678901234567890
+      expiration: 3600000 # 1 hour
+      refresh-expiration: 86400000 # 24 hours
+
+# Server Configuration for tests
+server:
+  port: 0 # Random port for tests
+
+# Logging Configuration for tests
+logging:
+  level:
+    com.globaldeals: DEBUG
+    org.springframework.security: DEBUG
+    org.hibernate.SQL: DEBUG
+
+# Application Configuration for tests
+app:
+  cors:
+    allowed-origins: http://localhost:3000
+    allowed-methods: GET,POST,PUT,DELETE,OPTIONS
+    allowed-headers: "*"
+    allow-credentials: true
+    max-age: 3600

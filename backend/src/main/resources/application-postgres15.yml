@@ -1,0 +1,91 @@
+# PostgreSQL 15 (Red Hat) Development Profile
+# 针对 Red Hat PostgreSQL 15 优化的配置
+
+spring:
+  application:
+    name: globaldeals-backend
+  
+  # Database Configuration - Red Hat PostgreSQL 15
+  datasource:
+    url: jdbc:postgresql://localhost:5433/globaldeals
+    username: ${DB_USERNAME:globaldeals_user}
+    password: ${DB_PASSWORD:globaldeals_password}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      minimum-idle: 5
+      maximum-pool-size: 20
+      connection-timeout: 30000
+      idle-timeout: 600000
+      max-lifetime: 1800000
+  auto-commit: false
+  
+  # JPA Configuration - PostgreSQL 15 优化
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    open-in-view: false
+    properties:
+      hibernate:
+        '[format_sql]': true
+        # dialect 自动检测，无需手动指定
+        jdbc:
+          '[time_zone]': UTC
+        connection:
+          '[provider_disables_autocommit]': false
+  # 注意：不要禁用自动提交的提供者控制，否则会导致“Unable to commit/rollback against JDBC Connection”
+  # connection:
+  #   '[provider_disables_autocommit]': true
+  
+  # Flyway Configuration - 兼容 PostgreSQL 15
+  flyway:
+    url: jdbc:postgresql://localhost:5433/globaldeals
+    user: ${DB_USERNAME:globaldeals_user}
+    password: ${DB_PASSWORD:globaldeals_password}
+    locations: classpath:db/migration
+    baseline-on-migrate: true
+    validate-on-migrate: true
+    # PostgreSQL 15 兼容性设置 - 移除不支持的选项
+    # postgresql-transactional-lock: false
+  
+  # Redis Configuration (已启用，使用 Red Hat 镜像)
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:dev123456}
+      timeout: 2000ms
+      lettuce:
+        pool:
+          max-active: 8
+          max-idle: 8
+          min-idle: 0
+
+  # JWT 配置使用 spring.security.jwt.*（见 application.yml）
+
+# Server Configuration
+server:
+  port: ${SERVER_PORT:8080}
+
+# Logging - PostgreSQL 15 调试
+logging:
+  level:
+    '[com.globaldeals]': INFO
+    '[org.springframework.security]': INFO
+    '[org.hibernate.SQL]': DEBUG
+    '[org.flywaydb]': INFO
+    root: INFO
+
+# Management (Actuator)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,flyway
+  endpoint:
+    health:
+      show-details: always
+  # Redis 健康检查已启用，现在使用 Red Hat 镜像
+  # health:
+  #   redis:
+  #     enabled: false
